@@ -1,12 +1,27 @@
 <?php
+/*
+ * Copyright 2013, Martyn Russell <martyn@lanedo.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 function debug($message)
 {
 	print "$message\n";
 }
 
-
-// validate email address
+/* validate email address */
 function address_validate($address_black_list, $address)
 {
 	/* Check black list... */
@@ -19,27 +34,27 @@ function address_validate($address_black_list, $address)
 	return (filter_var($address, FILTER_VALIDATE_EMAIL)) ? true : false;
 }
 
-// split email into name / address
+/* split email into name / address */
 function address_split($address_black_list, $str)
 {
 	$name = $email = '';
 
 	if (substr($str, 0, 1) == '<') {
-		// first character = <
+		/* first character = < */
 		$email = str_replace(array('<', '>'), '', $str);
 	} else if (strpos($str,' <') !== false) {
-		// possibly = name <email>
+		/* possibly = name <email> */
 		list($name, $email) = explode(' <', $str);
 		$email = str_replace('>', '', $email);
 		$name = str_replace(array('"', "'"), '', $name);
 	}
 
-	// Drop address entirely if on black list or not valid
+	/* Drop address entirely if on black list or not valid */
 	if (!address_validate($address_black_list, $email)) {
 		return null;
 	}
 
-	// Try to be clever with Foo in foo@bar.baz as a name
+	/* Try to be clever with Foo in foo@bar.baz as a name */
 	if ($name == $email) {
 		$parts = explode("@", $email);
 		$address = str_replace(array('.','-'), ' ', $parts[0]);
@@ -89,7 +104,7 @@ function mail_get_contacts($connection, $address_black_list)
 
 	debug("  Retrieveing contacts from emails (NOTE: this may take a few minutes)...");
 
-	// Use only 5 for testing.
+	/* Use only 5 for testing. */
 	//$result = imap_fetch_overview($connection, "1:100", 0);
 
 	$result = imap_fetch_overview($connection, "1:{$check->Nmsgs}", 0);
@@ -120,11 +135,11 @@ function dump_contacts_to_file($contacts)
 {
 	$file = 'people.txt';
 
-	// Open the file to get existing content
+	/* Open the file to get existing content */
 	$current = file_get_contents($file);
-	// Append a new person to the file
+	/* Append a new person to the file */
 	$current .= "John Smith\n";
-	// Write the contents back to the file
+	/* Write the contents back to the file */
 	file_put_contents($file, $current);
 }
 
