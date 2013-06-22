@@ -21,22 +21,74 @@ function debug($message)
 	print "$message\n";
 }
 
-/* validate email address */
-function address_validate($address_black_list, $address)
+function format_time_elapsed($ptime)
 {
-	/* Check black list... */
-	foreach ($address_black_list as $ignore) {
+	$etime = time() - $ptime;
+
+	if ($etime < 1) {
+		return '0 seconds';
+	}
+
+	$a = array(12 * 30 * 24 * 60 * 60  =>  'year',
+	           30 * 24 * 60 * 60       =>  'month',
+	           24 * 60 * 60            =>  'day',
+	           60 * 60                 =>  'hour',
+	           60                      =>  'minute',
+	           1                       =>  'second');
+
+	foreach ($a as $secs => $str) {
+		$d = $etime / $secs;
+		if ($d >= 1) {
+			$r = round($d);
+			return $r . ' ' . $str . ($r > 1 ? 's' : '') . ' ago';
+		}
+	}
+}
+
+function format_bytes($size, $precision = 2)
+{
+	$base = log($size) / log(1024);
+	$suffixes = array('bytes', 'kb', 'Mb', 'Gb', 'Tb');
+
+	return round(pow(1024, $base - floor($base)), $precision) . " " . $suffixes[floor($base)];
+}
+
+/* Validate email address */
+function address_is_black_listed($address)
+{
+	$black_list = array('noreply',
+	                    'no-reply',
+	                    'do_not_reply',
+	                    'do-not-reply',
+	                    'donotreply',
+	                    'donotrespond');
+
+	foreach ($black_list as $ignore) {
 		if (strstr($address, $ignore)) {
-			return false;
+			return true;
 		}
 	}
 
-	return (filter_var($address, FILTER_VALIDATE_EMAIL)) ? true : false;
+	return false;
 }
 
-/* split email into name / address */
-function address_split($address_black_list, $str)
+function address_is_useful($address)
 {
+	if (address_is_black_listed($address)) {
+		return false;
+	}
+
+	if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
+		return false;
+	}
+
+	return true;
+}
+
+/* Split email into name / address */
+function address_split($str)
+{
+	// FIXME: Is this function still useful?
 	$name = $email = '';
 
 	if (substr($str, 0, 1) == '<') {
@@ -50,7 +102,7 @@ function address_split($address_black_list, $str)
 	}
 
 	/* Drop address entirely if on black list or not valid */
-	if (!address_validate($address_black_list, $email)) {
+	if (address_is_useful($email)) {
 		return null;
 	}
 
@@ -63,7 +115,28 @@ function address_split($address_black_list, $str)
 
 	return array(trim(strtolower($email)) => trim($name));
 }
-	
+
+/* Join [personal] <[mailbox]@[host]> */
+function address_join($personal, $mailbox, $host)
+{
+	if ((!isset($mailbox) || $mailbox == "") ||
+	    (!isset($host) || $host == "")) {
+		return null;
+	}
+
+	$email = "$mailbox@$host";
+
+	/* Try to be clever with Foo in foo@bar.baz as a name */
+	if ((!isset($personal) || $personal == "") || ($personal == $email)) {
+		$str = str_replace(array('.','-'), ' ', $mailbox);
+		$name = ucwords(strtolower($str));
+	} else {
+		$name = $personal;
+	}
+
+	return array(trim(strtolower($email)) => trim($name));
+}
+
 function mail_connect($username, $password)
 {
 	/* connect to gmail */
@@ -87,12 +160,13 @@ function mail_disconnect($connection)
 	imap_close($connection);
 }
 
-function mail_get_contacts($connection, $address_black_list)
+function mail_get_contacts($connection, $last_update)
 {
 	$contacts = null;
+	$hosts = null;
 
-	/* Fetch an overview for all messages in INBOX */
-	debug("Checking for emails");
+	/* fetch an overview for all messages in INBOX */
+	debug("Checking INBOX");
 	$check = imap_check($connection);
 
 	if ($check->Nmsgs < 1) {
@@ -102,17 +176,35 @@ function mail_get_contacts($connection, $address_black_list)
 		debug("  Found {$check->Nmsgs} emails");
 	}
 
-	debug("  Retrieveing contacts from emails (NOTE: this may take a few minutes)...");
+	// Test
+	/* $last_update = strtotime("2008-01-01 12:00:00"); */
+	/* $last_update = strToTime( "-7 days"); */
 
-	/* Use only 5 for testing. */
-	//$result = imap_fetch_overview($connection, "1:100", 0);
+	$last_update_formatted = date("D, j M Y H:i:s O T", $last_update);
 
-	$result = imap_fetch_overview($connection, "1:{$check->Nmsgs}", 0);
+	debug("  Retrieveing contacts from emails, ignoring emails before: " . $last_update_formatted);
+	debug("  (NOTE: this may take a few minutes)...");
 
-	foreach ($result as $overview) {
-		$contact = address_split($address_black_list, $overview->from);
+	$uids = imap_sort($connection, SORTARRIVAL, 0, SE_UID, "SINCE \"$last_update_formatted\"");
 
-		if ($contact == null) {
+	foreach ($uids as $uid) {
+		$msgno = imap_msgno($connection, $uid);
+		$header = imap_header($connection, $msgno);
+
+		if (!isset ($header->from)) {
+			continue;
+		}
+
+		$contact = address_join(isset($header->from[0]->personal) ? $header->from[0]->personal : "",
+		                        $header->from[0]->mailbox,
+		                        $header->from[0]->host);
+
+		list($address, $name) = each($contact);
+
+		debug("  Found '$name <$address>', '" . $header->date . "'");
+
+		if (!isset($contact) || !address_is_useful($address)) {
+			debug("  --> Contact was null/invalid/blacklisted, ignoring");
 			continue;
 		}
 
@@ -121,39 +213,83 @@ function mail_get_contacts($connection, $address_black_list)
 		} else {
 			$contacts += $contact;
 		}
+
+		if (sizeof($hosts) < 1) {
+			$hosts = $header->from[0]->host;
+		} else {
+			$hosts += $header->from[0]->host;
+		}
 	}
 
-	debug("  Found ".sizeof($contacts)." contacts");
+	debug("  Found " . sizeof($contacts) . " new contacts");
 
-	ksort($contacts, SORT_LOCALE_STRING);
+	if ($contacts != null) {
+		ksort($contacts, SORT_LOCALE_STRING);
+	}
+
 	echo print_r($contacts, true);
 
 	return $contacts;
 }
 
-function dump_contacts_to_file($contacts)
+function cache_save($cache_filename, $contacts)
 {
-	$file = 'people.txt';
+	debug("Cache: Saving contacts to '$cache_filename'...");
 
-	/* Open the file to get existing content */
-	$current = file_get_contents($file);
-	/* Append a new person to the file */
-	$current .= "John Smith\n";
-	/* Write the contents back to the file */
-	file_put_contents($file, $current);
+	$content = serialize($contacts);
+	$bytes = file_put_contents($cache_filename, $content);
+
+	if ($bytes < 1) {
+		debug("  Could not save " . sizeof($contacts) . " contacts");
+		return false;
+	} else {
+		debug("  Done (wrote " . sizeof($contacts) . " contacts, " . format_bytes($bytes) . ")");
+	}
+
+	return true;
 }
 
-/* Start */
+function cache_load($cache_filename)
+{
+	debug("Cache: Loading contacts from '$cache_filename'...");
+
+	if (!file_exists($cache_filename)) {
+		debug("  No previous contacts cached.");
+		return array(null, 0);
+	}
+
+	$last_update = filemtime($cache_filename);
+
+	debug("  Last update was " . format_time_elapsed($last_update));
+
+	$content = file_get_contents($cache_filename);
+	$contacts = unserialize($content);
+
+	debug("  Done (read " . sizeof($contacts) . " contacts)");
+
+	return array($contacts, $last_update);
+}
+
+/* Variables / Settings */
+$home_dir = getenv("HOME");
+$cache_filename = "$home_dir/.cache/contacts.txt";
+
+/* Check arguments */
 if ($argc < 2) {
 	die("Expecting more arguments\n\nUsage: ".$argv[0]." <username> <password>\n\n");
 }
 
-$address_black_list = array('noreply', 'no-reply', 'do_not_reply', 'do-not-reply', 'donotreply', 'donotrespond');
-
+/* Start */
 $username = $argv[1];
 $password = $argv[2];
+
+list($contacts, $last_update) = cache_load($cache_filename);
+
 $connection = mail_connect($username, $password);
-$contacts = mail_get_contacts($connection, $address_black_list);
+$contacts = mail_get_contacts($connection, $last_update);
+
+cache_save($cache_filename, $contacts);
+
 mail_disconnect($connection);
 
 ?>
