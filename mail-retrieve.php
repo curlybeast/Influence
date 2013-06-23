@@ -16,6 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+include_once("deps.php");
+
 function debug($message)
 {
 	print "$message\n";
@@ -269,6 +271,9 @@ function cache_load($cache_filename)
 
 	return array($contacts, $last_update);
 }
+
+/* Make sure we have packages installed */
+check_deps();
 
 /* Variables / Settings */
 $home_dir = getenv("HOME");
