@@ -17,43 +17,8 @@
  */
 
 include_once("deps.php");
-
-function debug($message)
-{
-	print "$message\n";
-}
-
-function format_time_elapsed($ptime)
-{
-	$etime = time() - $ptime;
-
-	if ($etime < 1) {
-		return '0 seconds';
-	}
-
-	$a = array(12 * 30 * 24 * 60 * 60  =>  'year',
-	           30 * 24 * 60 * 60       =>  'month',
-	           24 * 60 * 60            =>  'day',
-	           60 * 60                 =>  'hour',
-	           60                      =>  'minute',
-	           1                       =>  'second');
-
-	foreach ($a as $secs => $str) {
-		$d = $etime / $secs;
-		if ($d >= 1) {
-			$r = round($d);
-			return $r . ' ' . $str . ($r > 1 ? 's' : '') . ' ago';
-		}
-	}
-}
-
-function format_bytes($size, $precision = 2)
-{
-	$base = log($size) / log(1024);
-	$suffixes = array('bytes', 'kb', 'Mb', 'Gb', 'Tb');
-
-	return round(pow(1024, $base - floor($base)), $precision) . " " . $suffixes[floor($base)];
-}
+include_once("utils.php");
+include_once("cache.php");
 
 /* Validate email address */
 function address_is_black_listed($address)
@@ -232,44 +197,6 @@ function mail_get_contacts($connection, $last_update)
 	echo print_r($contacts, true);
 
 	return $contacts;
-}
-
-function cache_save($cache_filename, $contacts)
-{
-	debug("Cache: Saving contacts to '$cache_filename'...");
-
-	$content = serialize($contacts);
-	$bytes = file_put_contents($cache_filename, $content);
-
-	if ($bytes < 1) {
-		debug("  Could not save " . sizeof($contacts) . " contacts");
-		return false;
-	} else {
-		debug("  Done (wrote " . sizeof($contacts) . " contacts, " . format_bytes($bytes) . ")");
-	}
-
-	return true;
-}
-
-function cache_load($cache_filename)
-{
-	debug("Cache: Loading contacts from '$cache_filename'...");
-
-	if (!file_exists($cache_filename)) {
-		debug("  No previous contacts cached.");
-		return array(null, 0);
-	}
-
-	$last_update = filemtime($cache_filename);
-
-	debug("  Last update was " . format_time_elapsed($last_update));
-
-	$content = file_get_contents($cache_filename);
-	$contacts = unserialize($content);
-
-	debug("  Done (read " . sizeof($contacts) . " contacts)");
-
-	return array($contacts, $last_update);
 }
 
 /* Make sure we have packages installed */
